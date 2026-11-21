@@ -8,6 +8,6 @@ publish = false
 
 [dependencies]
 brep-protocol = "=2.0.1"
-brep_kernel = { package = "BREP_kernel", version = "=0.24.0" }
+brep_kernel = { package = "BREP_kernel", version = "=0.26.0" }
 # The same release's blend crate, for the edge-to-faces order `BREP_kernel` does not re-export.
-brep_blend = { package = "BREP_blend", version = "=0.24.0" }
+brep_blend = { package = "BREP_blend", version = "=0.26.0" }
