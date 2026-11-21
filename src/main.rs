@@ -7,7 +7,8 @@ use brep_kernel::{
     AffineTransform, BooleanOperation, BooleanOptions, BrepSolid, KernelRefusal, NurbsCurve,
     OffsetCorners, PointClass, RefusalClass, SectionPlacement, SweepPath, Vec3, Vec4,
     LawSegment, RadiusLaw, boolean_operation, boolean_operation_nary, chamfer_edges_asymmetric,
-    classify_point, fillet_edges_variable_law,
+    classify_point, fillet_edges_conic_setback, fillet_edges_variable_law, sew_step, solid_closest_points, solid_outward_normals, thicken_faces,
+    solid_principal_curvatures,
     delete_faces_and_heal, draft_faces, export_step, extrude_profile_brep, fillet_edges,
     import_step, loft_profile_brep, make_arc, make_box_brep, make_cone_brep, make_cylinder_brep,
     make_line, make_periodic_bspline, make_sphere_brep, make_torus_brep, move_faces,
@@ -572,6 +573,57 @@ impl brep_protocol::Kernel for NextBrep {
         ))
     }
 
+    /// next.BREP's nearest point of the solid, the point itself where the solid holds it.
+    fn closest(&mut self, s: &Solid, points: &[model::Vec3]) -> Result<Vec<model::Vec3>, Refusal> {
+        let s = some(s, "find a point of")?;
+        let points: Vec<Vec3> = points.iter().map(|&p| v3(p)).collect();
+        Ok(solid_closest_points(s, &points, CLASSIFY)
+            .map_err(refused)?
+            .into_iter()
+            .map(|p| [p.x, p.y, p.z])
+            .collect())
+    }
+
+    /// next.BREP's outward unit normal at boundary points: `None` at a crease or off the boundary.
+    /// The empty solid has no boundary.
+    fn normal(&mut self, s: &Solid, points: &[model::Vec3]) -> Result<Vec<Option<model::Vec3>>, Refusal> {
+        let Some(s) = s.as_ref() else { return Ok(vec![None; points.len()]) };
+        let points: Vec<Vec3> = points.iter().map(|&p| v3(p)).collect();
+        Ok(solid_outward_normals(s, &points, CLASSIFY)
+            .map_err(refused)?
+            .into_iter()
+            .map(|n| n.map(|n| [n.x, n.y, n.z]))
+            .collect())
+    }
+
+    /// next.BREP's principal curvatures at the boundary point nearest each point, `None` on a crease.
+    fn curvature(&mut self, s: &Solid, points: &[model::Vec3]) -> Result<Vec<Option<[f64; 2]>>, Refusal> {
+        let s = some(s, "measure the curvature of")?;
+        let points: Vec<Vec3> = points.iter().map(|&p| v3(p)).collect();
+        solid_principal_curvatures(s, &points, CLASSIFY).map_err(refused)
+    }
+
+    /// next.BREP's conic round sized by setback, its shoulder `rho` of the way to the edge.
+    fn fillet_conic(&mut self, s: &Solid, edges: &[model::Vec3], setback: f64, rho: f64) -> Result<Solid, Refusal> {
+        let s = some(s, "fillet")?;
+        let found = edge_points(s, edges)?;
+        Ok(Some(
+            fillet_edges_conic_setback(s, &found, None, setback, rho, None).map_err(refused)?,
+        ))
+    }
+
+    /// next.BREP's thickening of the faces the points lie on, along their outward normals.
+    fn thicken(&mut self, s: &Solid, faces: &[model::Vec3], thickness: f64) -> Result<Solid, Refusal> {
+        let s = some(s, "thicken")?;
+        let points: Vec<Vec3> = faces.iter().map(|&p| v3(p)).collect();
+        Ok(solid(thicken_faces(s, &points, thickness).map_err(refused)?))
+    }
+
+    /// next.BREP's sewing of a STEP file's faces into one solid.
+    fn sew(&mut self, text: &str, tolerance: f64) -> Result<Solid, Refusal> {
+        Ok(solid(sew_step(text, tolerance).map_err(refused)?))
+    }
+
     /// next.BREP's fillet under a radius law on the edge's arc length, here one linear segment from
     /// one radius to the other. A single edge's law runs from the edge's own start (`t0`), so the
     /// radius named for the end nearest `from` goes first when that end is the start.
@@ -790,6 +842,12 @@ impl brep_protocol::Kernel for NextBrep {
             "difference_all",
             "fillet",
             "fillet_variable",
+            "closest",
+            "normal",
+            "curvature",
+            "sew",
+            "thicken",
+            "fillet_conic",
             "chamfer",
             "chamfer_two",
             "offset",
