@@ -54,7 +54,7 @@ failure.
 The adapter classifies points at the suite's tolerance, 1e-7 mm, and says so in `hello`. It
 declares 4e-3 mm, the edge-to-face disagreement next.BREP's validator accepts in a valid solid.
 
-Left out of `supports`, since next.BREP 0.26.0 has no public call of the protocol's shape for it:
+Left out of `supports`, since next.BREP 0.27.0 has no public call of the protocol's shape for it:
 
 - Face offsets, thickening a solid's faces, and outward normals: next.BREP builds these, but behind
   its feature pipeline or in private modules.

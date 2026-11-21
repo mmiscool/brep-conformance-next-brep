@@ -7,7 +7,8 @@ use brep_kernel::{
     AffineTransform, BooleanOperation, BooleanOptions, BrepSolid, KernelRefusal, NurbsCurve,
     OffsetCorners, PointClass, RefusalClass, SectionPlacement, SweepPath, Vec3, Vec4,
     LawSegment, RadiusLaw, boolean_operation, boolean_operation_nary, chamfer_edges_asymmetric,
-    classify_point, fillet_edges_conic_setback, fillet_edges_variable_law, sew_step, solid_closest_points, solid_outward_normals, thicken_faces,
+    classify_point, extrude_profile_with_holes, fillet_edges_conic_setback, revolve_profile_with_holes,
+    screw_profile_brep, solid_section, solid_section_area, fillet_edges_variable_law, sew_step, solid_closest_points, solid_outward_normals, thicken_faces,
     solid_principal_curvatures,
     delete_faces_and_heal, draft_faces, export_step, extrude_profile_brep, fillet_edges,
     import_step, loft_profile_brep, make_arc, make_box_brep, make_cone_brep, make_cylinder_brep,
@@ -126,9 +127,22 @@ fn sketch(p: &profile::Profile, plane: Plane) -> Result<Vec<NurbsCurve>, Refusal
             "next.BREP's profile constructions take one loop: a profile with holes",
         ));
     }
+    p.loops.first().map_or(Ok(Vec::new()), |segs| sketch_loop(segs, plane))
+}
+
+/// A profile with holes as next.BREP's curves: its first loop, the outer one, and its other
+/// loops, the holes, each a closed chain.
+fn sketch_holes(p: &profile::Profile, plane: Plane) -> Result<(Vec<NurbsCurve>, Vec<Vec<NurbsCurve>>), Refusal> {
+    let mut loops = p.loops.iter().map(|segs| sketch_loop(segs, plane));
+    let outer = loops.next().unwrap_or(Ok(Vec::new()))?;
+    Ok((outer, loops.collect::<Result<_, _>>()?))
+}
+
+/// One loop of the suite's profile as next.BREP's curves, in order.
+fn sketch_loop(segs: &[profile::Seg], plane: Plane) -> Result<Vec<NurbsCurve>, Refusal> {
     let (ax, ay) = plane.axes();
     let mut curves = Vec::new();
-    for seg in p.loops.iter().flatten() {
+    for seg in segs {
         let next = match *seg {
             profile::Seg::Line { a, b } => {
                 make_line(plane.point(a), plane.point(b)).map_err(failed)?
@@ -262,6 +276,15 @@ fn make(p: &Primitive) -> Result<BrepSolid, Refusal> {
             make_cone_brep(o, z, *bottom, *top, *height).map_err(failed)?,
             frame,
         ),
+        // A profile with holes is next.BREP's extrusion of an outer loop and its holes.
+        Primitive::Extrude {
+            frame,
+            profile,
+            height,
+        } if profile.loops.len() > 1 => {
+            let (outer, holes) = sketch_holes(profile, Plane::Xy(0.0))?;
+            (extrude_profile_with_holes(&outer, &holes, z, *height).map_err(refused)?, frame)
+        }
         Primitive::Extrude {
             frame,
             profile,
@@ -274,9 +297,28 @@ fn make(p: &Primitive) -> Result<BrepSolid, Refusal> {
             frame,
             profile,
             angle,
+        } if profile.loops.len() > 1 => {
+            let (outer, holes) = sketch_holes(profile, Plane::Meridian)?;
+            (revolve_profile_with_holes(&outer, &holes, o, z, *angle).map_err(refused)?, frame)
+        }
+        Primitive::Revolve {
+            frame,
+            profile,
+            angle,
         } => (
             revolve_profile_brep(&sketch(profile, Plane::Meridian)?, o, z, *angle)
                 .map_err(failed)?,
+            frame,
+        ),
+        // next.BREP's screw: the meridian profile turned right-handed about z through `angle`,
+        // rising `rise` per radian.
+        Primitive::Screw {
+            frame,
+            profile,
+            rise,
+            angle,
+        } => (
+            screw_profile_brep(&sketch(profile, Plane::Meridian)?, o, z, *rise, *angle).map_err(refused)?,
             frame,
         ),
         // The top section is the scaled copy of the profile the protocol sends.
@@ -437,7 +479,7 @@ impl brep_protocol::Kernel for NextBrep {
     }
 
     fn version(&self) -> String {
-        "0.26.0".into()
+        "0.27.0".into()
     }
 
     fn tolerance(&self) -> f64 {
@@ -617,6 +659,23 @@ impl brep_protocol::Kernel for NextBrep {
         let s = some(s, "thicken")?;
         let points: Vec<Vec3> = faces.iter().map(|&p| v3(p)).collect();
         Ok(solid(thicken_faces(s, &points, thickness).map_err(refused)?))
+    }
+
+    /// next.BREP's section of the boundary by a plane, each piece an edge of the cut sampled within
+    /// `tolerance`.
+    fn section(&mut self, s: &Solid, origin: model::Vec3, normal: model::Vec3, tolerance: f64) -> Result<Vec<Vec<model::Vec3>>, Refusal> {
+        let Some(s) = s.as_ref() else { return Ok(Vec::new()) };
+        Ok(solid_section(s, v3(origin), v3(normal), tolerance)
+            .map_err(refused)?
+            .into_iter()
+            .map(|piece| piece.into_iter().map(|p| [p.x, p.y, p.z]).collect())
+            .collect())
+    }
+
+    /// next.BREP's area of the cut by a plane.
+    fn section_area(&mut self, s: &Solid, origin: model::Vec3, normal: model::Vec3) -> Result<f64, Refusal> {
+        let Some(s) = s.as_ref() else { return Ok(0.0) };
+        solid_section_area(s, v3(origin), v3(normal)).map_err(refused)
     }
 
     /// next.BREP's sewing of a STEP file's faces into one solid.
@@ -819,7 +878,7 @@ impl brep_protocol::Kernel for NextBrep {
         }
     }
 
-    /// What next.BREP 0.26.0 has one call of the protocol's shape for. It builds face offsets,
+    /// What next.BREP 0.27.0 has one call of the protocol's shape for. It builds face offsets,
     /// thickened faces, outward normals and fillets of varying radius too, but with no public call
     /// of that shape, so they are left out with the operations it does not have.
     fn supports(&self) -> Vec<String> {
@@ -848,6 +907,9 @@ impl brep_protocol::Kernel for NextBrep {
             "sew",
             "thicken",
             "fillet_conic",
+            "screw",
+            "section",
+            "section_area",
             "chamfer",
             "chamfer_two",
             "offset",
