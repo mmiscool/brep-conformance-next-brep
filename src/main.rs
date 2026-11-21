@@ -7,7 +7,8 @@ use brep_kernel::{
     AffineTransform, BooleanOperation, BooleanOptions, BrepSolid, KernelRefusal, NurbsCurve,
     OffsetCorners, PointClass, RefusalClass, SectionPlacement, SweepPath, Vec3, Vec4,
     LawSegment, RadiusLaw, boolean_operation, boolean_operation_nary, chamfer_edges_asymmetric,
-    classify_point, extrude_profile_with_holes, fillet_edges_conic_setback, revolve_profile_with_holes,
+    classify_point, extrude_profile_with_holes, fillet_edges_conic_setback, fillet_edges_g2, fillet_edges_radii,
+    revolve_profile_with_holes,
     screw_profile_brep, solid_section, solid_section_area, fillet_edges_variable_law, sew_step, solid_closest_points, solid_outward_normals, thicken_faces,
     solid_principal_curvatures,
     delete_faces_and_heal, draft_faces, export_step, extrude_profile_brep, fillet_edges,
@@ -721,6 +722,27 @@ impl brep_protocol::Kernel for NextBrep {
         ))
     }
 
+    /// next.BREP's fillet of several edges in one operation, each edge at its own radius.
+    fn fillet_radii(&mut self, s: &Solid, edges: &[model::Vec3], radii: &[f64]) -> Result<Solid, Refusal> {
+        let s = some(s, "fillet")?;
+        let found = edge_points(s, edges)?;
+        Ok(Some(fillet_edges_radii(s, &found, None, radii, false, None).map_err(refused)?))
+    }
+
+    /// next.BREP's curvature-continuous (order 2) fillet: tangent offset and centre radius.
+    fn fillet_g2(&mut self, s: &Solid, edges: &[model::Vec3], offset: f64, center: f64) -> Result<Solid, Refusal> {
+        let s = some(s, "fillet")?;
+        let found = edge_points(s, edges)?;
+        Ok(Some(fillet_edges_g2(s, &found, None, offset, center, None).map_err(refused)?))
+    }
+
+    /// next.BREP's chamfer of several edges in one operation, each edge at its own distance.
+    fn chamfer_distances(&mut self, s: &Solid, edges: &[model::Vec3], distances: &[f64]) -> Result<Solid, Refusal> {
+        let s = some(s, "chamfer")?;
+        let found = edge_points(s, edges)?;
+        Ok(Some(fillet_edges_radii(s, &found, None, distances, true, None).map_err(refused)?))
+    }
+
     /// next.BREP's two-distance chamfer, each distance set back along its face, both alike.
     fn chamfer(&mut self, s: &Solid, edges: &[model::Vec3], d: f64) -> Result<Solid, Refusal> {
         let s = some(s, "chamfer")?;
@@ -910,6 +932,9 @@ impl brep_protocol::Kernel for NextBrep {
             "difference_all",
             "fillet",
             "fillet_variable",
+            "fillet_radii",
+            "fillet_g2",
+            "chamfer_distances",
             "closest",
             "normal",
             "curvature",
