@@ -127,19 +127,19 @@ fn sketch(p: &profile::Profile, plane: Plane) -> Result<Vec<NurbsCurve>, Refusal
             "next.BREP's profile constructions take one loop: a profile with holes",
         ));
     }
-    p.loops.first().map_or(Ok(Vec::new()), |segs| sketch_loop(segs, plane))
+    p.loops.first().map_or(Ok(Vec::new()), |segs| sketch_loop(segs, plane, true))
 }
 
 /// A profile with holes as next.BREP's curves: its first loop, the outer one, and its other
 /// loops, the holes, each a closed chain.
 fn sketch_holes(p: &profile::Profile, plane: Plane) -> Result<(Vec<NurbsCurve>, Vec<Vec<NurbsCurve>>), Refusal> {
-    let mut loops = p.loops.iter().map(|segs| sketch_loop(segs, plane));
+    let mut loops = p.loops.iter().map(|segs| sketch_loop(segs, plane, false));
     let outer = loops.next().unwrap_or(Ok(Vec::new()))?;
     Ok((outer, loops.collect::<Result<_, _>>()?))
 }
 
 /// One loop of the suite's profile as next.BREP's curves, in order.
-fn sketch_loop(segs: &[profile::Seg], plane: Plane) -> Result<Vec<NurbsCurve>, Refusal> {
+fn sketch_loop(segs: &[profile::Seg], plane: Plane, halve_circles: bool) -> Result<Vec<NurbsCurve>, Refusal> {
     let (ax, ay) = plane.axes();
     let mut curves = Vec::new();
     for seg in segs {
@@ -161,7 +161,7 @@ fn sketch_loop(segs: &[profile::Seg], plane: Plane) -> Result<Vec<NurbsCurve>, R
                 let c = plane.point(center);
                 // A whole circle goes as its two halves: next.BREP's lofts take a section of two
                 // curves or more.
-                if a1 - a0 >= std::f64::consts::TAU - 1e-12 {
+                if halve_circles && a1 - a0 >= std::f64::consts::TAU - 1e-12 {
                     let mid = a0 + (a1 - a0) / 2.0;
                     curves.push(make_arc(c, ax, y, radius, a0, mid).map_err(failed)?);
                     make_arc(c, ax, y, radius, mid, a1).map_err(failed)?
@@ -797,6 +797,13 @@ impl brep_protocol::Kernel for NextBrep {
         Ok(Some(delete_faces_and_heal(s, &ids).map_err(refused)?))
     }
 
+    /// next.BREP offsets faces onto their offset carriers in one call (its Push Face push).
+    fn offset_faces(&mut self, s: &Solid, faces: &[model::Vec3], distance: f64) -> Result<Solid, Refusal> {
+        let s = some(s, "offset faces of")?;
+        let points: Vec<Vec3> = faces.iter().map(|&p| v3(p)).collect();
+        Ok(Some(brep_kernel::offset_faces(s, &points, distance).map_err(refused)?))
+    }
+
     /// next.BREP moves faces by a translation, or turns them about an axis: a motion that does
     /// both, turning about an axis while sliding along it, has no one call.
     fn move_faces(
@@ -810,12 +817,14 @@ impl brep_protocol::Kernel for NextBrep {
         let identity = (0..3).all(|i| (0..3).all(|j| m[i][j] == if i == j { 1.0 } else { 0.0 }));
         if identity {
             let t = Vec3::new(m[0][3], m[1][3], m[2][3]);
-            return Ok(Some(move_faces(s, &ids, t).map_err(refused)?));
+            let _ = (&ids, t);
+            let points: Vec<Vec3> = faces.iter().map(|&p| v3(p)).collect();
+            return Ok(Some(brep_kernel::transform_faces(s, &points, m).map_err(refused)?));
         }
         let Some((point, axis, angle)) = turn(m) else {
-            return Err(Refusal::unsupported(
-                "next.BREP moves faces by a translation or a turn, not a turn and a slide at once",
-            ));
+            // A turn and a slide at once: next.BREP solves the whole rigid motion in one call.
+            let points: Vec<Vec3> = faces.iter().map(|&p| v3(p)).collect();
+            return Ok(Some(brep_kernel::transform_faces(s, &points, m).map_err(refused)?));
         };
         Ok(Some(
             rotate_faces(s, &ids, point, axis, angle).map_err(refused)?,
@@ -915,6 +924,7 @@ impl brep_protocol::Kernel for NextBrep {
             "offset",
             "delete_faces",
             "move_faces",
+            "offset_faces",
             "shell",
             "draft",
             "write_step",
