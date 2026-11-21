@@ -6,7 +6,8 @@ use std::process::ExitCode;
 use brep_kernel::{
     AffineTransform, BooleanOperation, BooleanOptions, BrepSolid, KernelRefusal, NurbsCurve,
     OffsetCorners, PointClass, RefusalClass, SectionPlacement, SweepPath, Vec3, Vec4,
-    boolean_operation, boolean_operation_nary, chamfer_edges_asymmetric, classify_point,
+    LawSegment, RadiusLaw, boolean_operation, boolean_operation_nary, chamfer_edges_asymmetric,
+    classify_point, fillet_edges_variable_law,
     delete_faces_and_heal, draft_faces, export_step, extrude_profile_brep, fillet_edges,
     import_step, loft_profile_brep, make_arc, make_box_brep, make_cone_brep, make_cylinder_brep,
     make_line, make_periodic_bspline, make_sphere_brep, make_torus_brep, move_faces,
@@ -571,6 +572,44 @@ impl brep_protocol::Kernel for NextBrep {
         ))
     }
 
+    /// next.BREP's fillet under a radius law on the edge's arc length, here one linear segment from
+    /// one radius to the other. A single edge's law runs from the edge's own start (`t0`), so the
+    /// radius named for the end nearest `from` goes first when that end is the start.
+    fn fillet_variable(
+        &mut self,
+        s: &Solid,
+        edge: model::Vec3,
+        from: model::Vec3,
+        r_from: f64,
+        r_to: f64,
+    ) -> Result<Solid, Refusal> {
+        let s = some(s, "fillet")?;
+        let id = edge_at(s, edge)?;
+        let record = s
+            .edges
+            .iter()
+            .find(|e| e.id == id)
+            .ok_or_else(|| Refusal::invalid("the edge named has no record"))?;
+        let start = record.curve.evaluate(record.t0).map_err(failed)?;
+        let end = record.curve.evaluate(record.t1).map_err(failed)?;
+        let near = v3(from);
+        let (first, last) = if near.sub(start).length() <= near.sub(end).length() {
+            (r_from, r_to)
+        } else {
+            (r_to, r_from)
+        };
+        let law = RadiusLaw::from_segments(&[LawSegment::Linear {
+            length: 1.0,
+            start_radius: first,
+            end_radius: last,
+        }])
+        .map_err(refused)?;
+        Ok(Some(
+            fillet_edges_variable_law(s, &[v3(edge)], None, &law, false, None)
+                .map_err(refused)?,
+        ))
+    }
+
     /// next.BREP's two-distance chamfer, each distance set back along its face, both alike.
     fn chamfer(&mut self, s: &Solid, edges: &[model::Vec3], d: f64) -> Result<Solid, Refusal> {
         let s = some(s, "chamfer")?;
@@ -750,6 +789,7 @@ impl brep_protocol::Kernel for NextBrep {
             "union_all",
             "difference_all",
             "fillet",
+            "fillet_variable",
             "chamfer",
             "chamfer_two",
             "offset",

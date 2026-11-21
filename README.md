@@ -58,8 +58,6 @@ Left out of `supports`, since next.BREP 0.26.0 has no public call of the protoco
 
 - Face offsets, thickening a solid's faces, and outward normals: next.BREP builds these, but behind
   its feature pipeline or in private modules.
-- A variable fillet: next.BREP's runs its radius from the edge's own start, and cannot be told the
-  end the protocol names.
 - Screws (its helical sweep keeps the section square to the helix), slabs, conic fillets sized by
   setback, fillets and chamfers of several sizes at once, curvature-continuous, setback, face and
   full-round fillets, sewing, the nearest point, curvatures, distance, interference, Betti numbers,
