@@ -11,7 +11,7 @@ use brep_kernel::{
     revolve_profile_with_holes,
     screw_profile_brep, solid_section, solid_section_area, fillet_edges_variable_law, sew_step, solid_closest_points, solid_interference, solid_least_box, make_slab_brep, solid_outward_normals, thicken_faces,
     solid_principal_curvatures,
-    delete_faces_and_heal, draft_faces, export_step, extrude_profile_brep, fillet_edges,
+    delete_faces_and_heal, draft_faces, export_step, extrude_profile_brep,
     import_step, loft_profile_brep, make_arc, make_box_brep, make_cone_brep, make_cylinder_brep,
     make_line, make_periodic_bspline, make_sphere_brep, make_torus_brep, move_faces,
     offset_shell_rounded, offset_solid, project_point_to_curve, resolve_face_by_point,
@@ -627,8 +627,11 @@ impl brep_protocol::Kernel for NextBrep {
     fn fillet(&mut self, s: &Solid, edges: &[model::Vec3], radius: f64) -> Result<Solid, Refusal> {
         let s = some(s, "fillet")?;
         let found = edge_points(s, edges)?;
+        // The suite's fillet follows each picked edge's tangent chain and refuses a pair of
+        // balls that could not each touch both faces they roll on.
+        let options = brep_kernel::FilletOptions { follow_tangent_chains: true, refuse_pinch: true };
         Ok(Some(
-            fillet_edges(s, &found, None, radius, false, None).map_err(refused)?,
+            brep_kernel::fillet_edges_with_options(s, &found, None, radius, options, None).map_err(refused)?,
         ))
     }
 
