@@ -9,7 +9,7 @@ use brep_kernel::{
     LawSegment, RadiusLaw, boolean_operation, boolean_operation_nary, chamfer_edges_asymmetric,
     classify_point, extrude_profile_with_holes, fillet_edges_conic_setback, fillet_edges_g2, fillet_edges_radii, fillet_edges_setback, fillet_faces, full_round, solid_display,
     revolve_profile_with_holes,
-    screw_profile_brep, solid_section, solid_section_area, fillet_edges_variable_law, sew_step, solid_closest_points, solid_least_box, make_slab_brep, solid_outward_normals, thicken_faces,
+    screw_profile_brep, solid_section, solid_section_area, fillet_edges_variable_law, sew_step, solid_closest_points, solid_interference, solid_least_box, make_slab_brep, solid_outward_normals, thicken_faces,
     solid_principal_curvatures,
     delete_faces_and_heal, draft_faces, export_step, extrude_profile_brep, fillet_edges,
     import_step, loft_profile_brep, make_arc, make_box_brep, make_cone_brep, make_cylinder_brep,
@@ -624,6 +624,13 @@ impl brep_protocol::Kernel for NextBrep {
         ))
     }
 
+    /// next.BREP's interference of two solids as they stand: their common volume and their gap.
+    fn interference(&mut self, a: &Solid, b: &Solid) -> Result<brep_protocol::Meeting, Refusal> {
+        let (a, b) = (some(a, "meet")?, some(b, "meet")?);
+        let met = solid_interference(a, b, CLASSIFY).map_err(refused)?;
+        Ok(brep_protocol::Meeting { volume: met.volume, gap: met.gap })
+    }
+
     /// next.BREP's least box round the solid, on its exact geometry.
     fn bounding_box(&mut self, s: &Solid) -> Result<[model::Vec3; 2], Refusal> {
         let s = some(s, "box")?;
@@ -998,6 +1005,7 @@ impl brep_protocol::Kernel for NextBrep {
             "display",
             "chamfer_distances",
             "closest",
+            "interference",
             "slab",
             "bounding_box",
             "normal",
