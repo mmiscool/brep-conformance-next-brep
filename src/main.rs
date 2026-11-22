@@ -9,7 +9,7 @@ use brep_kernel::{
     LawSegment, RadiusLaw, boolean_operation, boolean_operation_nary, chamfer_edges_asymmetric,
     classify_point, extrude_profile_with_holes, fillet_edges_conic_setback, fillet_edges_g2, fillet_edges_radii, fillet_edges_setback, fillet_faces, full_round, solid_display,
     revolve_profile_with_holes,
-    screw_profile_brep, solid_section, solid_section_area, fillet_edges_variable_law, sew_step, solid_closest_points, solid_least_box, solid_outward_normals, thicken_faces,
+    screw_profile_brep, solid_section, solid_section_area, fillet_edges_variable_law, sew_step, solid_closest_points, solid_least_box, make_slab_brep, solid_outward_normals, thicken_faces,
     solid_principal_curvatures,
     delete_faces_and_heal, draft_faces, export_step, extrude_profile_brep, fillet_edges,
     import_step, loft_profile_brep, make_arc, make_box_brep, make_cone_brep, make_cylinder_brep,
@@ -322,6 +322,14 @@ fn make(p: &Primitive) -> Result<BrepSolid, Refusal> {
             screw_profile_brep(&sketch(profile, Plane::Meridian)?, o, z, *rise, *angle).map_err(refused)?,
             frame,
         ),
+        // next.BREP's slab: the block under the bicubic height field, on the frame.
+        Primitive::Slab {
+            frame,
+            size,
+            knots_u,
+            knots_v,
+            heights,
+        } => (make_slab_brep(*size, knots_u, knots_v, heights).map_err(refused)?, frame),
         // The top section is the scaled copy of the profile the protocol sends.
         Primitive::Loft {
             frame,
@@ -990,6 +998,7 @@ impl brep_protocol::Kernel for NextBrep {
             "display",
             "chamfer_distances",
             "closest",
+            "slab",
             "bounding_box",
             "normal",
             "curvature",
