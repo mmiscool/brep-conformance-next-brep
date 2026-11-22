@@ -7,7 +7,7 @@ use brep_kernel::{
     AffineTransform, BooleanOperation, BooleanOptions, BrepSolid, KernelRefusal, NurbsCurve,
     OffsetCorners, PointClass, RefusalClass, SectionPlacement, SweepPath, Vec3, Vec4,
     LawSegment, RadiusLaw, boolean_operation, boolean_operation_nary, chamfer_edges_asymmetric,
-    classify_point, extrude_profile_with_holes, fillet_edges_conic_setback, fillet_edges_g2, fillet_edges_radii, fillet_faces, full_round, solid_display,
+    classify_point, extrude_profile_with_holes, fillet_edges_conic_setback, fillet_edges_g2, fillet_edges_radii, fillet_edges_setback, fillet_faces, full_round, solid_display,
     revolve_profile_with_holes,
     screw_profile_brep, solid_section, solid_section_area, fillet_edges_variable_law, sew_step, solid_closest_points, solid_outward_normals, thicken_faces,
     solid_principal_curvatures,
@@ -676,6 +676,13 @@ impl brep_protocol::Kernel for NextBrep {
         ))
     }
 
+    /// next.BREP's fillet whose fillets stop `setback` short of the corner, closed by one patch.
+    fn fillet_setback(&mut self, s: &Solid, edges: &[model::Vec3], radius: f64, setback: f64) -> Result<Solid, Refusal> {
+        let s = some(s, "fillet")?;
+        let found = edge_points(s, edges)?;
+        Ok(Some(fillet_edges_setback(s, &found, None, radius, setback, None).map_err(refused)?))
+    }
+
     /// next.BREP's full round: the face `middle` lies on replaced by a round tangent to it and to
     /// the faces `side_a` and `side_b` lie on.
     fn full_round(&mut self, s: &Solid, side_a: model::Vec3, middle: model::Vec3, side_b: model::Vec3) -> Result<Solid, Refusal> {
@@ -972,6 +979,7 @@ impl brep_protocol::Kernel for NextBrep {
             "fillet_g2",
             "fillet_faces",
             "full_round",
+            "fillet_setback",
             "display",
             "chamfer_distances",
             "closest",
