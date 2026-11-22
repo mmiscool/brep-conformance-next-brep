@@ -7,7 +7,7 @@ use brep_kernel::{
     AffineTransform, BooleanOperation, BooleanOptions, BrepSolid, KernelRefusal, NurbsCurve,
     OffsetCorners, PointClass, RefusalClass, SectionPlacement, SweepPath, Vec3, Vec4,
     LawSegment, RadiusLaw, boolean_operation, boolean_operation_nary, chamfer_edges_asymmetric,
-    classify_point, extrude_profile_with_holes, fillet_edges_conic_setback, fillet_edges_g2, fillet_edges_radii, fillet_faces, full_round,
+    classify_point, extrude_profile_with_holes, fillet_edges_conic_setback, fillet_edges_g2, fillet_edges_radii, fillet_faces, full_round, solid_display,
     revolve_profile_with_holes,
     screw_profile_brep, solid_section, solid_section_area, fillet_edges_variable_law, sew_step, solid_closest_points, solid_outward_normals, thicken_faces,
     solid_principal_curvatures,
@@ -655,6 +655,27 @@ impl brep_protocol::Kernel for NextBrep {
         ))
     }
 
+    /// next.BREP's display of the solid within `tolerance`: each face's triangles with its normals,
+    /// each edge's polyline with the faces it bounds, and the seams, field for field.
+    fn display(&mut self, s: &Solid, tolerance: f64) -> Result<brep_protocol::Display, Refusal> {
+        let s = some(s, "display")?;
+        let shown = solid_display(s, tolerance).map_err(refused)?;
+        let p = |q: Vec3| [q.x, q.y, q.z];
+        Ok(brep_protocol::Display::new(
+            shown
+                .faces
+                .into_iter()
+                .map(|f| brep_protocol::DisplayFace::new(f.positions.into_iter().map(p).collect(), f.normals.into_iter().map(p).collect(), f.triangles))
+                .collect(),
+            shown
+                .edges
+                .into_iter()
+                .map(|e| brep_protocol::DisplayEdge::new(e.points.into_iter().map(p).collect(), e.faces, None, false))
+                .collect(),
+            shown.seams.into_iter().map(|seam| seam.into_iter().map(p).collect()).collect(),
+        ))
+    }
+
     /// next.BREP's full round: the face `middle` lies on replaced by a round tangent to it and to
     /// the faces `side_a` and `side_b` lie on.
     fn full_round(&mut self, s: &Solid, side_a: model::Vec3, middle: model::Vec3, side_b: model::Vec3) -> Result<Solid, Refusal> {
@@ -951,6 +972,7 @@ impl brep_protocol::Kernel for NextBrep {
             "fillet_g2",
             "fillet_faces",
             "full_round",
+            "display",
             "chamfer_distances",
             "closest",
             "normal",
