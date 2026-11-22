@@ -735,6 +735,13 @@ impl brep_protocol::Kernel for NextBrep {
         Ok(solid(thicken_faces(s, &points, thickness).map_err(refused)?))
     }
 
+    /// next.BREP's hidden-line drawing looking along `direction`, each chord within `tolerance`.
+    fn project(&mut self, s: &Solid, direction: model::Vec3, tolerance: f64) -> Result<brep_protocol::Projection, Refusal> {
+        let Some(s) = s.as_ref() else { return Ok(brep_protocol::Projection::default()) };
+        let drawn = brep_render::sheets::hlr::hidden_line_drawing(s, direction, tolerance).map_err(refused)?;
+        Ok(brep_protocol::Projection::new(drawn.visible, drawn.hidden))
+    }
+
     /// next.BREP's section of the boundary by a plane, each piece an edge of the cut sampled within
     /// `tolerance`.
     fn section(&mut self, s: &Solid, origin: model::Vec3, normal: model::Vec3, tolerance: f64) -> Result<Vec<Vec<model::Vec3>>, Refusal> {
@@ -1024,6 +1031,7 @@ impl brep_protocol::Kernel for NextBrep {
             "screw",
             "section",
             "section_area",
+            "project",
             "chamfer",
             "chamfer_two",
             "offset",
