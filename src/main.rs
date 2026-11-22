@@ -878,7 +878,13 @@ impl brep_protocol::Kernel for NextBrep {
     fn shell(&mut self, s: &Solid, open: &[model::Vec3], t: f64) -> Result<Solid, Refusal> {
         let s = some(s, "shell")?;
         let ids = faces_at(s, open)?;
-        Ok(Some(offset_shell_rounded(s, &ids, t).map_err(refused)?))
+        // Open: next.BREP's shell, its walls offset and re-joined sharp (the protocol's walls
+        // `t` thick, meeting at the source's own edges). Closed (no opening): the rounded
+        // hollow, the points within `t` of the boundary.
+        if ids.is_empty() {
+            return Ok(Some(offset_shell_rounded(s, &ids, t).map_err(refused)?));
+        }
+        Ok(Some(brep_kernel::offset_shell(s, &ids, t).map_err(refused)?.solid))
     }
 
     fn draft(
