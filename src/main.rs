@@ -16,7 +16,7 @@ use brep_kernel::{
     make_line, make_periodic_bspline, make_sphere_brep, make_torus_brep, move_faces,
     offset_shell_rounded, offset_solid, project_point_to_curve, resolve_face_by_point,
     revolve_profile_brep, rotate_faces, solid_mass_properties, solid_mass_properties_full,
-    split_solid_by_plane, sweep_profile_along_chain, sweep_profile_twisted,
+    split_solid_by_plane, sweep_profile_along_chain,
     tessellate_brep_watertight, transform_brep,
 };
 use brep_protocol::{Refusal, model, model::PathSeg, model::Primitive, profile};
@@ -383,7 +383,13 @@ fn make(p: &Primitive) -> Result<BrepSolid, Refusal> {
                 .collect();
             let curve = NurbsCurve::new(path.degree, path.knots.clone(), ctrl).map_err(failed)?;
             let section = sketch(profile, Plane::Xy(0.0))?;
-            let s = sweep_profile_twisted(&section, &curve, *twist, None).map_err(refused)?;
+            // The profile as drawn, carried rigidly by the path from its start (the protocol's
+            // path starts at the origin along z, square to the profile's plane) by the
+            // rotation-minimizing frame with the twist about the path; its stations refined to
+            // 1e-7, under the suite's area bar of 1e-6 relative.
+            let s = brep_kernel::sweep_profile_twisted_within(&section, &curve, *twist, None, brep_kernel::SectionPlacement::Rigid, None, Some(1e-7))
+                .map_err(refused)?
+                .solid;
             (s, frame)
         }
         _ => {
