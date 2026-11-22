@@ -593,10 +593,12 @@ impl brep_protocol::Kernel for NextBrep {
         let Some(s) = s else {
             return Ok(vec![model::Side::Out; pts.len()]);
         };
+        // One classifier for all the points: next.BREP's classify_point builds the same one per call.
+        let classifier = brep_kernel::SolidClassifier::new(s, CLASSIFY).map_err(failed)?;
         pts.iter()
             .map(|&p| {
                 Ok(
-                    match classify_point(v3(p), s, CLASSIFY).map_err(failed)?.class {
+                    match classifier.classify(v3(p)).map_err(failed)?.class {
                         PointClass::In => model::Side::In,
                         PointClass::On => model::Side::On,
                         PointClass::Out => model::Side::Out,
