@@ -28,12 +28,15 @@ maintains it.
 [`src/main.rs`](src/main.rs) answers each function with next.BREP's one call for it, as
 [the contract](https://github.com/springcraft-ai/brep-conformance/blob/main/doc/contract.md#what-an-adapter-may-do)
 asks, and offers only those: `supports` lists them, and the suite scores a case that needs any
-other as unsupported. It builds the suite's box, cylinder, sphere, torus and cone
-with next.BREP's own constructors, and its extrusions, revolutions, lofts and sweeps with its
-profile constructions, each about the origin and moved onto its frame by next.BREP's affine map. It
-answers the booleans, the booleans of many, the mass properties, the validity check,
-classification, rigid and affine maps, fillets, chamfers, offsets, shells, drafts, face deletes and
-moves, plane splits, meshes and STEP with next.BREP's own calls.
+other as unsupported. It builds the suite's box, cylinder, sphere, torus, cone and slab
+with next.BREP's own constructors, and its extrusions, revolutions, screws, lofts and sweeps with
+its profile constructions, each about the origin and moved onto its frame by next.BREP's affine map.
+It answers the booleans, the booleans of many, the mass properties, the validity check,
+classification, rigid and affine maps, fillets (constant, variable, conic, of several sizes at
+once, curvature-continuous, by setback, between faces and full rounds), chamfers, offsets, face
+offsets, shells, thickening, drafts, face deletes and moves, plane splits, sections, sewing, the
+nearest point, normals, curvatures, interference, the least bounding box, hidden-line projections,
+displays, meshes and STEP with next.BREP's own calls.
 
 next.BREP takes an edge or a face by a point and finds the nearest within about a millimetre. The
 contract names an edge or a face only within `10·ε`, so the adapter first holds each point to that,
@@ -43,31 +46,28 @@ names no one face, and the call is unsupported.
 
 A two-distance chamfer sets its first distance back along the first of the edge's faces in
 next.BREP's own order, read from `BREP_blend`, the same release's blend crate; the adapter gives
-the named face's distance in that place. A face move is next.BREP's translation of faces, or its
-turn of faces about an axis; a move that turns and slides at once is unsupported.
+the named face's distance in that place. A face move is next.BREP's rigid motion of faces.
 
 next.BREP says a result is empty by a solid with no faces, and the adapter reads that, and nothing
 else, as the empty solid. Its refusals keep their class: geometry next.BREP does not model yet is
 unsupported, an input it rejects or that has no single answer is invalid, and anything else is a
 failure.
 
-The adapter classifies points at the suite's tolerance, 1e-7 mm, and says so in `hello`. It
-declares 4e-3 mm, the edge-to-face disagreement next.BREP's validator accepts in a valid solid.
+The adapter classifies points at the suite's tolerance, 1e-7 mm, and says so in `hello`: next.BREP's
+classifier calls a point on the boundary within ten times the tolerance it is built with, so it is
+built with a tenth of that. It declares 4e-3 mm, the edge-to-face disagreement next.BREP's validator
+accepts in a valid solid.
 
-Left out of `supports`, since next.BREP 0.27.0 has no public call of the protocol's shape for it:
+Left out of `supports`, since next.BREP 0.28.0 has no public call of the protocol's shape for
+them: ray casts, distance, Betti numbers, and curvature-continuous fillets sized by setback.
 
-- Face offsets, thickening a solid's faces, and outward normals: next.BREP builds these, but behind
-  its feature pipeline or in private modules.
-- Screws (its helical sweep keeps the section square to the helix), slabs, conic fillets sized by
-  setback, fillets and chamfers of several sizes at once, curvature-continuous, setback, face and
-  full-round fillets, sewing, the nearest point, curvatures, distance, interference, Betti numbers,
-  sections, projections, the least bounding box, displays and ray casts.
+next.BREP's extrusions and revolutions take a profile with holes; its other profile constructions
+(lofts, sweeps, screws) take one loop, so a profile with holes is unsupported there.
 
-next.BREP's profile constructions take one loop, so a profile with holes is unsupported: next.BREP
-cuts holes as booleans of their own. A profile's periodic spline is next.BREP's periodic B-spline
-on the period's points, which takes evenly spaced knots, so a spline on other knots is
-unsupported; a conic is its rational quadratic through the two ends and the apex. A blend-section
-segment has no next.BREP curve and is unsupported.
+A profile's periodic spline is next.BREP's periodic B-spline on the period's points, which takes
+evenly spaced knots, so a spline on other knots is unsupported; a conic is its rational quadratic
+through the two ends and the apex. A blend-section segment has no next.BREP curve and is
+unsupported.
 
 ## Setup
 
