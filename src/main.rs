@@ -600,7 +600,9 @@ impl brep_protocol::Kernel for NextBrep {
             return Ok(vec![model::Side::Out; pts.len()]);
         };
         // One classifier for all the points: next.BREP's classify_point builds the same one per call.
-        let classifier = brep_kernel::SolidClassifier::new(s, CLASSIFY).map_err(failed)?;
+        // next.BREP's classifier calls a point On within ten times the tolerance it is built with, so it
+        // is built with a tenth of CLASSIFY: On means within CLASSIFY of the boundary, as configured.
+        let classifier = brep_kernel::SolidClassifier::new(s, CLASSIFY / 10.0).map_err(failed)?;
         pts.iter()
             .map(|&p| {
                 Ok(
