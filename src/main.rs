@@ -884,7 +884,10 @@ impl brep_protocol::Kernel for NextBrep {
         if ids.is_empty() {
             return Ok(Some(offset_shell_rounded(s, &ids, t).map_err(refused)?));
         }
-        Ok(Some(brep_kernel::offset_shell(s, &ids, t).map_err(refused)?.solid))
+        // Walls meeting across the whole part leave no cavity: refused, as the protocol's shell
+        // must leave one.
+        let options = brep_kernel::ShellOptions { refuse_no_cavity: true };
+        Ok(Some(brep_kernel::offset_shell_with_options(s, &ids, t, options).map_err(refused)?.solid))
     }
 
     fn draft(
