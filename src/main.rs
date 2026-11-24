@@ -841,9 +841,8 @@ impl brep_protocol::Kernel for NextBrep {
     fn chamfer(&mut self, s: &Solid, edges: &[model::Vec3], d: f64) -> Result<Solid, Refusal> {
         let s = some(s, "chamfer")?;
         let found = edge_points(s, edges)?;
-        Ok(Some(
-            chamfer_edges_asymmetric(s, &found, None, d, d, None).map_err(refused)?,
-        ))
+        let options = brep_kernel::ChamferOptions { follow_tangent_chains: true };
+        Ok(Some(brep_kernel::chamfer_edges_with_options(s, &found, None, d, options, None).map_err(refused)?))
     }
 
     /// next.BREP sets `d1` back along the first of the edge's two faces in its own order, so the
