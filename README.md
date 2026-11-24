@@ -59,7 +59,7 @@ built with a tenth of that. It declares 4e-3 mm, the edge-to-face disagreement n
 accepts in a valid solid.
 
 Left out of `supports`, since next.BREP 0.28.0 has no public call of the protocol's shape for
-them: ray casts, distance, Betti numbers, and curvature-continuous fillets sized by setback.
+them: ray casts, distance and Betti numbers.
 
 next.BREP's extrusions and revolutions take a profile with holes; its other profile constructions
 (lofts, sweeps, screws) take one loop, so a profile with holes is unsupported there.
