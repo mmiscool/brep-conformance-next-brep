@@ -4,16 +4,20 @@
 use std::process::ExitCode;
 
 use brep_kernel::{
-    AffineTransform, BooleanOperation, BooleanOptions, BrepSolid, KernelRefusal, NurbsCurve,
-    OffsetCorners, PointClass, RefusalClass, SectionPlacement, SweepPath, Vec3, Vec4,
-    boolean_operation, boolean_operation_nary, chamfer_edges_asymmetric, classify_point,
-    delete_faces_and_heal, draft_faces, export_step, extrude_profile_brep, fillet_edges,
-    import_step, loft_profile_brep, make_arc, make_box_brep, make_cone_brep, make_cylinder_brep,
-    make_line, make_periodic_bspline, make_sphere_brep, make_torus_brep, move_faces,
-    offset_shell_rounded, offset_solid, project_point_to_curve, resolve_face_by_point,
-    revolve_profile_brep, rotate_faces, solid_mass_properties, solid_mass_properties_full,
-    split_solid_by_plane, sweep_profile_along_chain, sweep_profile_twisted,
-    tessellate_brep_watertight, transform_brep,
+    AffineTransform, BooleanOperation, BooleanOptions, BrepSolid, KernelRefusal, LawSegment,
+    NurbsCurve, OffsetCorners, PointClass, RadiusLaw, RefusalClass, SectionPlacement, SweepPath,
+    Vec3, Vec4, boolean_operation, boolean_operation_nary, chamfer_edges_asymmetric,
+    classify_point, delete_faces_and_heal, draft_faces, export_step, extrude_profile_brep,
+    extrude_profile_with_holes, fillet_edges_conic_setback, fillet_edges_g2, fillet_edges_radii,
+    fillet_edges_setback, fillet_edges_setback_g2, fillet_edges_variable_law, fillet_faces,
+    full_round, import_step, loft_profile_brep, make_arc, make_box_brep, make_cone_brep,
+    make_cylinder_brep, make_line, make_periodic_bspline, make_slab_brep, make_sphere_brep,
+    make_torus_brep, offset_shell_rounded, offset_solid, project_point_to_curve,
+    resolve_face_by_point, revolve_profile_brep, revolve_profile_with_holes, rotate_faces,
+    screw_profile_brep, sew_step, solid_closest_points, solid_display, solid_interference,
+    solid_least_box, solid_mass_properties, solid_mass_properties_full, solid_outward_normals,
+    solid_principal_curvatures, solid_section, solid_section_area, split_solid_by_plane,
+    sweep_profile_along_chain, tessellate_brep_watertight, thicken_faces, transform_brep,
 };
 use brep_protocol::{Refusal, model, model::PathSeg, model::Primitive, profile};
 
@@ -124,9 +128,31 @@ fn sketch(p: &profile::Profile, plane: Plane) -> Result<Vec<NurbsCurve>, Refusal
             "next.BREP's profile constructions take one loop: a profile with holes",
         ));
     }
+    p.loops
+        .first()
+        .map_or(Ok(Vec::new()), |segs| sketch_loop(segs, plane, true))
+}
+
+/// A profile with holes as next.BREP's curves: its first loop, the outer one, and its other
+/// loops, the holes, each a closed chain.
+fn sketch_holes(
+    p: &profile::Profile,
+    plane: Plane,
+) -> Result<(Vec<NurbsCurve>, Vec<Vec<NurbsCurve>>), Refusal> {
+    let mut loops = p.loops.iter().map(|segs| sketch_loop(segs, plane, false));
+    let outer = loops.next().unwrap_or(Ok(Vec::new()))?;
+    Ok((outer, loops.collect::<Result<_, _>>()?))
+}
+
+/// One loop of the suite's profile as next.BREP's curves, in order.
+fn sketch_loop(
+    segs: &[profile::Seg],
+    plane: Plane,
+    halve_circles: bool,
+) -> Result<Vec<NurbsCurve>, Refusal> {
     let (ax, ay) = plane.axes();
     let mut curves = Vec::new();
-    for seg in p.loops.iter().flatten() {
+    for seg in segs {
         let next = match *seg {
             profile::Seg::Line { a, b } => {
                 make_line(plane.point(a), plane.point(b)).map_err(failed)?
@@ -145,7 +171,7 @@ fn sketch(p: &profile::Profile, plane: Plane) -> Result<Vec<NurbsCurve>, Refusal
                 let c = plane.point(center);
                 // A whole circle goes as its two halves: next.BREP's lofts take a section of two
                 // curves or more.
-                if a1 - a0 >= std::f64::consts::TAU - 1e-12 {
+                if halve_circles && a1 - a0 >= std::f64::consts::TAU - 1e-12 {
                     let mid = a0 + (a1 - a0) / 2.0;
                     curves.push(make_arc(c, ax, y, radius, a0, mid).map_err(failed)?);
                     make_arc(c, ax, y, radius, mid, a1).map_err(failed)?
@@ -260,6 +286,18 @@ fn make(p: &Primitive) -> Result<BrepSolid, Refusal> {
             make_cone_brep(o, z, *bottom, *top, *height).map_err(failed)?,
             frame,
         ),
+        // A profile with holes is next.BREP's extrusion of an outer loop and its holes.
+        Primitive::Extrude {
+            frame,
+            profile,
+            height,
+        } if profile.loops.len() > 1 => {
+            let (outer, holes) = sketch_holes(profile, Plane::Xy(0.0))?;
+            (
+                extrude_profile_with_holes(&outer, &holes, z, *height).map_err(refused)?,
+                frame,
+            )
+        }
         Primitive::Extrude {
             frame,
             profile,
@@ -272,9 +310,43 @@ fn make(p: &Primitive) -> Result<BrepSolid, Refusal> {
             frame,
             profile,
             angle,
+        } if profile.loops.len() > 1 => {
+            let (outer, holes) = sketch_holes(profile, Plane::Meridian)?;
+            (
+                revolve_profile_with_holes(&outer, &holes, o, z, *angle).map_err(refused)?,
+                frame,
+            )
+        }
+        Primitive::Revolve {
+            frame,
+            profile,
+            angle,
         } => (
             revolve_profile_brep(&sketch(profile, Plane::Meridian)?, o, z, *angle)
                 .map_err(failed)?,
+            frame,
+        ),
+        // next.BREP's screw: the meridian profile turned right-handed about z through `angle`,
+        // rising `rise` per radian.
+        Primitive::Screw {
+            frame,
+            profile,
+            rise,
+            angle,
+        } => (
+            screw_profile_brep(&sketch(profile, Plane::Meridian)?, o, z, *rise, *angle)
+                .map_err(refused)?,
+            frame,
+        ),
+        // next.BREP's slab: the block under the bicubic height field, on the frame.
+        Primitive::Slab {
+            frame,
+            size,
+            knots_u,
+            knots_v,
+            heights,
+        } => (
+            make_slab_brep(*size, knots_u, knots_v, heights).map_err(refused)?,
             frame,
         ),
         // The top section is the scaled copy of the profile the protocol sends.
@@ -330,13 +402,22 @@ fn make(p: &Primitive) -> Result<BrepSolid, Refusal> {
                 .collect();
             let curve = NurbsCurve::new(path.degree, path.knots.clone(), ctrl).map_err(failed)?;
             let section = sketch(profile, Plane::Xy(0.0))?;
-            let s = sweep_profile_twisted(&section, &curve, *twist, None).map_err(refused)?;
+            // The profile as drawn, carried rigidly by the path from its start (the protocol's
+            // path starts at the origin along z, square to the profile's plane) by the
+            // rotation-minimizing frame with the twist about the path; its stations refined to
+            // 1e-7, under the suite's area bar of 1e-6 relative.
+            let s = brep_kernel::sweep_profile_twisted_within(
+                &section,
+                &curve,
+                *twist,
+                None,
+                brep_kernel::SectionPlacement::Rigid,
+                None,
+                Some(1e-7),
+            )
+            .map_err(refused)?
+            .solid;
             (s, frame)
-        }
-        _ => {
-            return Err(Refusal::unsupported(
-                "next.BREP has no one call for this constructor",
-            ));
         }
     };
     place(s, frame)
@@ -435,7 +516,7 @@ impl brep_protocol::Kernel for NextBrep {
     }
 
     fn version(&self) -> String {
-        "0.24.0".into()
+        "0.28.0".into()
     }
 
     fn tolerance(&self) -> f64 {
@@ -443,7 +524,7 @@ impl brep_protocol::Kernel for NextBrep {
     }
 
     fn configuration(&self) -> String {
-        format!("classify_point tolerance {CLASSIFY} mm")
+        format!("classify_point tolerance {CLASSIFY} mm; tolerances 1e-7 mm where a call takes one")
     }
 
     fn make(&mut self, p: &Primitive) -> Result<Solid, Refusal> {
@@ -540,15 +621,20 @@ impl brep_protocol::Kernel for NextBrep {
         let Some(s) = s else {
             return Ok(vec![model::Side::Out; pts.len()]);
         };
+        // One classifier for all the points: next.BREP's classify_point builds the same one per
+        // call.
+        // next.BREP's classifier calls a point On within ten times the tolerance it is built with,
+        // so it
+        // is built with a tenth of CLASSIFY: On means within CLASSIFY of the boundary, as
+        // configured.
+        let classifier = brep_kernel::SolidClassifier::new(s, CLASSIFY / 10.0).map_err(failed)?;
         pts.iter()
             .map(|&p| {
-                Ok(
-                    match classify_point(v3(p), s, CLASSIFY).map_err(failed)?.class {
-                        PointClass::In => model::Side::In,
-                        PointClass::On => model::Side::On,
-                        PointClass::Out => model::Side::Out,
-                    },
-                )
+                Ok(match classifier.classify(v3(p)).map_err(failed)?.class {
+                    PointClass::In => model::Side::In,
+                    PointClass::On => model::Side::On,
+                    PointClass::Out => model::Side::Out,
+                })
             })
             .collect()
     }
@@ -566,8 +652,335 @@ impl brep_protocol::Kernel for NextBrep {
     fn fillet(&mut self, s: &Solid, edges: &[model::Vec3], radius: f64) -> Result<Solid, Refusal> {
         let s = some(s, "fillet")?;
         let found = edge_points(s, edges)?;
+        // The suite's fillet follows each picked edge's tangent chain and refuses a pair of
+        // balls that could not each touch both faces they roll on.
+        let options = brep_kernel::FilletOptions {
+            follow_tangent_chains: true,
+            refuse_pinch: true,
+        };
         Ok(Some(
-            fillet_edges(s, &found, None, radius, false, None).map_err(refused)?,
+            brep_kernel::fillet_edges_with_options(s, &found, None, radius, options, None)
+                .map_err(refused)?,
+        ))
+    }
+
+    /// next.BREP's interference of two solids as they stand: their common volume and their gap.
+    fn interference(&mut self, a: &Solid, b: &Solid) -> Result<brep_protocol::Meeting, Refusal> {
+        let (a, b) = (some(a, "meet")?, some(b, "meet")?);
+        let met = solid_interference(a, b, CLASSIFY).map_err(refused)?;
+        Ok(brep_protocol::Meeting {
+            volume: met.volume,
+            gap: met.gap,
+        })
+    }
+
+    /// next.BREP's least box round the solid, on its exact geometry.
+    fn bounding_box(&mut self, s: &Solid) -> Result<[model::Vec3; 2], Refusal> {
+        let s = some(s, "box")?;
+        let [low, high] = solid_least_box(s, CLASSIFY).map_err(refused)?;
+        Ok([[low.x, low.y, low.z], [high.x, high.y, high.z]])
+    }
+
+    /// next.BREP's nearest point of the solid, the point itself where the solid holds it.
+    fn closest(&mut self, s: &Solid, points: &[model::Vec3]) -> Result<Vec<model::Vec3>, Refusal> {
+        let s = some(s, "find a point of")?;
+        let points: Vec<Vec3> = points.iter().map(|&p| v3(p)).collect();
+        Ok(solid_closest_points(s, &points, CLASSIFY)
+            .map_err(refused)?
+            .into_iter()
+            .map(|p| [p.x, p.y, p.z])
+            .collect())
+    }
+
+    /// next.BREP's outward unit normal at boundary points: `None` at a crease or off the boundary.
+    /// The empty solid has no boundary.
+    fn normal(
+        &mut self,
+        s: &Solid,
+        points: &[model::Vec3],
+    ) -> Result<Vec<Option<model::Vec3>>, Refusal> {
+        let Some(s) = s.as_ref() else {
+            return Ok(vec![None; points.len()]);
+        };
+        let points: Vec<Vec3> = points.iter().map(|&p| v3(p)).collect();
+        Ok(solid_outward_normals(s, &points, CLASSIFY)
+            .map_err(refused)?
+            .into_iter()
+            .map(|n| n.map(|n| [n.x, n.y, n.z]))
+            .collect())
+    }
+
+    /// next.BREP's principal curvatures at the boundary point nearest each point, `None` on a
+    /// crease.
+    fn curvature(
+        &mut self,
+        s: &Solid,
+        points: &[model::Vec3],
+    ) -> Result<Vec<Option<[f64; 2]>>, Refusal> {
+        let s = some(s, "measure the curvature of")?;
+        let points: Vec<Vec3> = points.iter().map(|&p| v3(p)).collect();
+        solid_principal_curvatures(s, &points, CLASSIFY).map_err(refused)
+    }
+
+    /// next.BREP's conic round sized by setback, its shoulder `rho` of the way to the edge.
+    fn fillet_conic(
+        &mut self,
+        s: &Solid,
+        edges: &[model::Vec3],
+        setback: f64,
+        rho: f64,
+    ) -> Result<Solid, Refusal> {
+        let s = some(s, "fillet")?;
+        let found = edge_points(s, edges)?;
+        Ok(Some(
+            fillet_edges_conic_setback(s, &found, None, setback, rho, None).map_err(refused)?,
+        ))
+    }
+
+    /// next.BREP's display of the solid within `tolerance`: each face's triangles with its normals,
+    /// each edge's polyline with the faces it bounds, and the seams, field for field.
+    fn display(&mut self, s: &Solid, tolerance: f64) -> Result<brep_protocol::Display, Refusal> {
+        let s = some(s, "display")?;
+        let shown = solid_display(s, tolerance).map_err(refused)?;
+        let p = |q: Vec3| [q.x, q.y, q.z];
+        Ok(brep_protocol::Display::new(
+            shown
+                .faces
+                .into_iter()
+                .map(|f| {
+                    brep_protocol::DisplayFace::new(
+                        f.positions.into_iter().map(p).collect(),
+                        f.normals.into_iter().map(p).collect(),
+                        f.triangles,
+                    )
+                })
+                .collect(),
+            shown
+                .edges
+                .into_iter()
+                .map(|e| {
+                    brep_protocol::DisplayEdge::new(
+                        e.points.into_iter().map(p).collect(),
+                        e.faces,
+                        None,
+                        false,
+                    )
+                })
+                .collect(),
+            shown
+                .seams
+                .into_iter()
+                .map(|seam| seam.into_iter().map(p).collect())
+                .collect(),
+        ))
+    }
+
+    /// next.BREP's fillet whose fillets stop `setback` short of the corner, closed by one patch.
+    fn fillet_setback(
+        &mut self,
+        s: &Solid,
+        edges: &[model::Vec3],
+        radius: f64,
+        setback: f64,
+    ) -> Result<Solid, Refusal> {
+        let s = some(s, "fillet")?;
+        let found = edge_points(s, edges)?;
+        Ok(Some(
+            fillet_edges_setback(s, &found, None, radius, setback, None).map_err(refused)?,
+        ))
+    }
+
+    /// next.BREP's curvature-continuous set-back corner: each fillet the order-2 section of tangent
+    /// offset `radius` at the equal-area thumbweight, stopping `setback` short of the corner, and
+    /// the corner closed by one patch with the fillets' and faces' curvature.
+    fn fillet_setback_g2(
+        &mut self,
+        s: &Solid,
+        edges: &[model::Vec3],
+        radius: f64,
+        setback: f64,
+    ) -> Result<Solid, Refusal> {
+        let s = some(s, "fillet")?;
+        let found = edge_points(s, edges)?;
+        Ok(Some(
+            fillet_edges_setback_g2(s, &found, None, radius, setback, 0.0, None)
+                .map_err(refused)?,
+        ))
+    }
+
+    /// next.BREP's full round: the face `middle` lies on replaced by a round tangent to it and to
+    /// the faces `side_a` and `side_b` lie on.
+    fn full_round(
+        &mut self,
+        s: &Solid,
+        side_a: model::Vec3,
+        middle: model::Vec3,
+        side_b: model::Vec3,
+    ) -> Result<Solid, Refusal> {
+        let s = some(s, "round")?;
+        faces_at(s, &[side_a, middle, side_b])?;
+        Ok(Some(
+            full_round(s, v3(side_a), v3(middle), v3(side_b), None).map_err(refused)?,
+        ))
+    }
+
+    /// next.BREP's fillet between two faces by a ball of `radius` touching both.
+    fn fillet_faces(
+        &mut self,
+        s: &Solid,
+        face_a: model::Vec3,
+        face_b: model::Vec3,
+        radius: f64,
+    ) -> Result<Solid, Refusal> {
+        let s = some(s, "fillet")?;
+        faces_at(s, &[face_a, face_b])?;
+        Ok(Some(
+            fillet_faces(s, v3(face_a), v3(face_b), radius, None).map_err(refused)?,
+        ))
+    }
+
+    /// next.BREP's thickening of the faces the points lie on, along their outward normals.
+    fn thicken(
+        &mut self,
+        s: &Solid,
+        faces: &[model::Vec3],
+        thickness: f64,
+    ) -> Result<Solid, Refusal> {
+        let s = some(s, "thicken")?;
+        faces_at(s, faces)?;
+        let points: Vec<Vec3> = faces.iter().map(|&p| v3(p)).collect();
+        Ok(solid(
+            thicken_faces(s, &points, thickness).map_err(refused)?,
+        ))
+    }
+
+    /// next.BREP's hidden-line drawing looking along `direction`, each chord within `tolerance`.
+    fn project(
+        &mut self,
+        s: &Solid,
+        direction: model::Vec3,
+        tolerance: f64,
+    ) -> Result<brep_protocol::Projection, Refusal> {
+        let Some(s) = s.as_ref() else {
+            return Ok(brep_protocol::Projection::default());
+        };
+        let drawn = brep_render::sheets::hlr::hidden_line_drawing(s, direction, tolerance)
+            .map_err(refused)?;
+        Ok(brep_protocol::Projection::new(drawn.visible, drawn.hidden))
+    }
+
+    /// next.BREP's section of the boundary by a plane, each piece an edge of the cut sampled within
+    /// `tolerance`.
+    fn section(
+        &mut self,
+        s: &Solid,
+        origin: model::Vec3,
+        normal: model::Vec3,
+        tolerance: f64,
+    ) -> Result<Vec<Vec<model::Vec3>>, Refusal> {
+        let Some(s) = s.as_ref() else {
+            return Ok(Vec::new());
+        };
+        Ok(solid_section(s, v3(origin), v3(normal), tolerance)
+            .map_err(refused)?
+            .into_iter()
+            .map(|piece| piece.into_iter().map(|p| [p.x, p.y, p.z]).collect())
+            .collect())
+    }
+
+    /// next.BREP's area of the cut by a plane.
+    fn section_area(
+        &mut self,
+        s: &Solid,
+        origin: model::Vec3,
+        normal: model::Vec3,
+    ) -> Result<f64, Refusal> {
+        let Some(s) = s.as_ref() else { return Ok(0.0) };
+        solid_section_area(s, v3(origin), v3(normal)).map_err(refused)
+    }
+
+    /// next.BREP's sewing of a STEP file's faces into one solid.
+    fn sew(&mut self, text: &str, tolerance: f64) -> Result<Solid, Refusal> {
+        Ok(solid(sew_step(text, tolerance).map_err(refused)?))
+    }
+
+    /// next.BREP's fillet under a radius law on the edge's arc length, here one linear segment from
+    /// one radius to the other. A single edge's law runs from the edge's own start (`t0`), so the
+    /// radius named for the end nearest `from` goes first when that end is the start.
+    fn fillet_variable(
+        &mut self,
+        s: &Solid,
+        edge: model::Vec3,
+        from: model::Vec3,
+        r_from: f64,
+        r_to: f64,
+    ) -> Result<Solid, Refusal> {
+        let s = some(s, "fillet")?;
+        let id = edge_at(s, edge)?;
+        let record = s
+            .edges
+            .iter()
+            .find(|e| e.id == id)
+            .ok_or_else(|| Refusal::invalid("the edge named has no record"))?;
+        let start = record.curve.evaluate(record.t0).map_err(failed)?;
+        let end = record.curve.evaluate(record.t1).map_err(failed)?;
+        let near = v3(from);
+        let (first, last) = if near.sub(start).length() <= near.sub(end).length() {
+            (r_from, r_to)
+        } else {
+            (r_to, r_from)
+        };
+        let law = RadiusLaw::from_segments(&[LawSegment::Linear {
+            length: 1.0,
+            start_radius: first,
+            end_radius: last,
+        }])
+        .map_err(refused)?;
+        Ok(Some(
+            fillet_edges_variable_law(s, &[v3(edge)], None, &law, false, None).map_err(refused)?,
+        ))
+    }
+
+    /// next.BREP's fillet of several edges in one operation, each edge at its own radius.
+    fn fillet_radii(
+        &mut self,
+        s: &Solid,
+        edges: &[model::Vec3],
+        radii: &[f64],
+    ) -> Result<Solid, Refusal> {
+        let s = some(s, "fillet")?;
+        let found = edge_points(s, edges)?;
+        Ok(Some(
+            fillet_edges_radii(s, &found, None, radii, false, None).map_err(refused)?,
+        ))
+    }
+
+    /// next.BREP's curvature-continuous (order 2) fillet: tangent offset and centre radius.
+    fn fillet_g2(
+        &mut self,
+        s: &Solid,
+        edges: &[model::Vec3],
+        offset: f64,
+        center: f64,
+    ) -> Result<Solid, Refusal> {
+        let s = some(s, "fillet")?;
+        let found = edge_points(s, edges)?;
+        Ok(Some(
+            fillet_edges_g2(s, &found, None, offset, center, None).map_err(refused)?,
+        ))
+    }
+
+    /// next.BREP's chamfer of several edges in one operation, each edge at its own distance.
+    fn chamfer_distances(
+        &mut self,
+        s: &Solid,
+        edges: &[model::Vec3],
+        distances: &[f64],
+    ) -> Result<Solid, Refusal> {
+        let s = some(s, "chamfer")?;
+        let found = edge_points(s, edges)?;
+        Ok(Some(
+            fillet_edges_radii(s, &found, None, distances, true, None).map_err(refused)?,
         ))
     }
 
@@ -575,8 +988,12 @@ impl brep_protocol::Kernel for NextBrep {
     fn chamfer(&mut self, s: &Solid, edges: &[model::Vec3], d: f64) -> Result<Solid, Refusal> {
         let s = some(s, "chamfer")?;
         let found = edge_points(s, edges)?;
+        let options = brep_kernel::ChamferOptions {
+            follow_tangent_chains: true,
+        };
         Ok(Some(
-            chamfer_edges_asymmetric(s, &found, None, d, d, None).map_err(refused)?,
+            brep_kernel::chamfer_edges_with_options(s, &found, None, d, options, None)
+                .map_err(refused)?,
         ))
     }
 
@@ -623,7 +1040,22 @@ impl brep_protocol::Kernel for NextBrep {
     fn shell(&mut self, s: &Solid, open: &[model::Vec3], t: f64) -> Result<Solid, Refusal> {
         let s = some(s, "shell")?;
         let ids = faces_at(s, open)?;
-        Ok(Some(offset_shell_rounded(s, &ids, t).map_err(refused)?))
+        // Open: next.BREP's shell, its walls offset and re-joined sharp (the protocol's walls
+        // `t` thick, meeting at the source's own edges). Closed (no opening): the rounded
+        // hollow, the points within `t` of the boundary.
+        if ids.is_empty() {
+            return Ok(Some(offset_shell_rounded(s, &ids, t).map_err(refused)?));
+        }
+        // Walls meeting across the whole part leave no cavity: refused, as the protocol's shell
+        // must leave one.
+        let options = brep_kernel::ShellOptions {
+            refuse_no_cavity: true,
+        };
+        Ok(Some(
+            brep_kernel::offset_shell_with_options(s, &ids, t, options)
+                .map_err(refused)?
+                .solid,
+        ))
     }
 
     fn draft(
@@ -647,6 +1079,21 @@ impl brep_protocol::Kernel for NextBrep {
         Ok(Some(delete_faces_and_heal(s, &ids).map_err(refused)?))
     }
 
+    /// next.BREP offsets faces onto their offset carriers in one call (its Push Face push).
+    fn offset_faces(
+        &mut self,
+        s: &Solid,
+        faces: &[model::Vec3],
+        distance: f64,
+    ) -> Result<Solid, Refusal> {
+        let s = some(s, "offset faces of")?;
+        faces_at(s, faces)?;
+        let points: Vec<Vec3> = faces.iter().map(|&p| v3(p)).collect();
+        Ok(Some(
+            brep_kernel::offset_faces(s, &points, distance).map_err(refused)?,
+        ))
+    }
+
     /// next.BREP moves faces by a translation, or turns them about an axis: a motion that does
     /// both, turning about an axis while sliding along it, has no one call.
     fn move_faces(
@@ -659,12 +1106,16 @@ impl brep_protocol::Kernel for NextBrep {
         let ids = faces_at(s, faces)?;
         let identity = (0..3).all(|i| (0..3).all(|j| m[i][j] == if i == j { 1.0 } else { 0.0 }));
         if identity {
-            let t = Vec3::new(m[0][3], m[1][3], m[2][3]);
-            return Ok(Some(move_faces(s, &ids, t).map_err(refused)?));
+            let points: Vec<Vec3> = faces.iter().map(|&p| v3(p)).collect();
+            return Ok(Some(
+                brep_kernel::transform_faces(s, &points, m).map_err(refused)?,
+            ));
         }
         let Some((point, axis, angle)) = turn(m) else {
-            return Err(Refusal::unsupported(
-                "next.BREP moves faces by a translation or a turn, not a turn and a slide at once",
+            // A turn and a slide at once: next.BREP solves the whole rigid motion in one call.
+            let points: Vec<Vec3> = faces.iter().map(|&p| v3(p)).collect();
+            return Ok(Some(
+                brep_kernel::transform_faces(s, &points, m).map_err(refused)?,
             ));
         };
         Ok(Some(
@@ -728,9 +1179,9 @@ impl brep_protocol::Kernel for NextBrep {
         }
     }
 
-    /// What next.BREP 0.24.0 has one call of the protocol's shape for. It builds face offsets,
-    /// thickened faces, outward normals and fillets of varying radius too, but with no public call
-    /// of that shape, so they are left out with the operations it does not have.
+    /// What next.BREP 0.28.0 has one call of the protocol's shape for. It has no such call for ray
+    /// casts, distances or Betti numbers, so those are left out with the operations it does not
+    /// have.
     fn supports(&self) -> Vec<String> {
         [
             "box",
@@ -750,11 +1201,34 @@ impl brep_protocol::Kernel for NextBrep {
             "union_all",
             "difference_all",
             "fillet",
+            "fillet_variable",
+            "fillet_radii",
+            "fillet_g2",
+            "fillet_faces",
+            "full_round",
+            "fillet_setback",
+            "fillet_setback_g2",
+            "display",
+            "chamfer_distances",
+            "closest",
+            "interference",
+            "slab",
+            "bounding_box",
+            "normal",
+            "curvature",
+            "sew",
+            "thicken",
+            "fillet_conic",
+            "screw",
+            "section",
+            "section_area",
+            "project",
             "chamfer",
             "chamfer_two",
             "offset",
             "delete_faces",
             "move_faces",
+            "offset_faces",
             "shell",
             "draft",
             "write_step",
