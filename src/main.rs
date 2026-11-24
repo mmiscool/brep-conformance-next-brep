@@ -494,7 +494,7 @@ impl brep_protocol::Kernel for NextBrep {
     }
 
     fn version(&self) -> String {
-        "0.27.0".into()
+        "0.28.0".into()
     }
 
     fn tolerance(&self) -> f64 {
@@ -1011,7 +1011,7 @@ impl brep_protocol::Kernel for NextBrep {
         }
     }
 
-    /// What next.BREP 0.27.0 has one call of the protocol's shape for. It builds face offsets,
+    /// What next.BREP 0.28.0 has one call of the protocol's shape for. It builds face offsets,
     /// thickened faces, outward normals and fillets of varying radius too, but with no public call
     /// of that shape, so they are left out with the operations it does not have.
     fn supports(&self) -> Vec<String> {
