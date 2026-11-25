@@ -58,11 +58,12 @@ classifier calls a point on the boundary within ten times the tolerance it is bu
 built with a tenth of that. It declares 4e-3 mm, the edge-to-face disagreement next.BREP's validator
 accepts in a valid solid.
 
-Left out of `supports`, since next.BREP 0.28.0 has no public call of the protocol's shape for
+Left out of `supports`, since next.BREP 0.29.0 has no public call of the protocol's shape for
 them: ray casts, distance and Betti numbers.
 
-next.BREP's extrusions and revolutions take a profile with holes; its other profile constructions
-(lofts, sweeps, screws) take one loop, so a profile with holes is unsupported there.
+next.BREP's extrusions and revolutions take a profile with holes. A sweep along a path takes one too:
+each loop is swept rigidly with the same twist and the holes' sweeps are subtracted from the outer one.
+Lofts and screws take one loop, so a profile with holes is unsupported there.
 
 A profile's periodic spline is next.BREP's periodic B-spline on the period's points, which takes
 evenly spaced knots, so a spline on other knots is unsupported; a conic is its rational quadratic
