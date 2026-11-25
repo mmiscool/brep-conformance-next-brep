@@ -401,22 +401,36 @@ fn make(p: &Primitive) -> Result<BrepSolid, Refusal> {
                 })
                 .collect();
             let curve = NurbsCurve::new(path.degree, path.knots.clone(), ctrl).map_err(failed)?;
-            let section = sketch(profile, Plane::Xy(0.0))?;
+            // Each loop as the one-loop profile constructions draw it (a whole circle halved).
+            let mut loops = profile
+                .loops
+                .iter()
+                .map(|segs| sketch_loop(segs, Plane::Xy(0.0), true));
+            let section = loops.next().unwrap_or(Ok(Vec::new()))?;
+            let holes = loops.collect::<Result<Vec<_>, _>>()?;
             // The profile as drawn, carried rigidly by the path from its start (the protocol's
             // path starts at the origin along z, square to the profile's plane) by the
             // rotation-minimizing frame with the twist about the path; its stations refined to
             // 1e-7, under the suite's area bar of 1e-6 relative.
-            let s = brep_kernel::sweep_profile_twisted_within(
-                &section,
-                &curve,
-                *twist,
-                None,
-                brep_kernel::SectionPlacement::Rigid,
-                None,
-                Some(1e-7),
-            )
-            .map_err(refused)?
-            .solid;
+            let swept = |section: &[NurbsCurve]| {
+                brep_kernel::sweep_profile_twisted_within(
+                    section,
+                    &curve,
+                    *twist,
+                    None,
+                    brep_kernel::SectionPlacement::Rigid,
+                    None,
+                    Some(1e-7),
+                )
+                .map_err(refused)
+                .map(|swept| swept.solid)
+            };
+            // A hole is the same rigid sweep of its loop, taken away: the same frame carries both.
+            let mut s = swept(&section)?;
+            for hole in &holes {
+                s = boolean(BooleanOperation::Subtract, &Some(s), &Some(swept(hole)?))?
+                    .ok_or_else(|| Refusal::unsupported("the hole took the whole sweep"))?;
+            }
             (s, frame)
         }
     };
