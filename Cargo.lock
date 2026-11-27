@@ -14,9 +14,9 @@ dependencies = [
 
 [[package]]
 name = "BREP_blend"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dba70b611d9895ddde1043313b00763185f42010b2050b13742a270152886af9"
+checksum = "c89fa98639551890464bd071f35062b8c12fc4cfe3a36670e69d3a98389689bd"
 dependencies = [
  "BREP_RANSAC",
  "BREP_boolean",
@@ -36,9 +36,9 @@ dependencies = [
 
 [[package]]
 name = "BREP_boolean"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab641977f5e5428c7509453bec4d44cce7f830311b385624ee5c0e638941d919"
+checksum = "85ca2dcfaaa635d979f744863707c4b2dd94b227c549301f112618d1fbbc595d"
 dependencies = [
  "BREP_RANSAC",
  "BREP_geometry",
@@ -67,9 +67,9 @@ dependencies = [
 
 [[package]]
 name = "BREP_construction"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78b3025d09708ed94e7292c8ee4e24e2efabed742e2ae161ff5851ba2bda5fba"
+checksum = "834d9afefb16a60d7505433d706d975071c6ad5b47c0aa106b44e3efb5fd083d"
 dependencies = [
  "BREP_RANSAC",
  "BREP_boolean",
@@ -87,9 +87,9 @@ dependencies = [
 
 [[package]]
 name = "BREP_direct_edit"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a2fbaccc0e724bcd48f37e7cc1ba20a75de8f5bd202be425750963a49d819de"
+checksum = "462f7c1062cce9b90b6eb2ff650ffef9316af7b75682ed1ccb86f0a2cd9e8ff8"
 dependencies = [
  "BREP_RANSAC",
  "BREP_blend",
@@ -122,9 +122,9 @@ dependencies = [
 
 [[package]]
 name = "BREP_geometry"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "053c52ce076db471877ddc89176c4b3f3e4587d10f8c9c938d3fee5c38cda2ec"
+checksum = "8899dd911aa64f648ed144e7b2f7b5a07a378aba07eee5d49956d3f5863dac43"
 dependencies = [
  "BREP_RANSAC",
  "rayon",
@@ -158,9 +158,9 @@ dependencies = [
 
 [[package]]
 name = "BREP_kernel"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fab4431fddddbaa15bae7d2c779533ae772d724608bb11766a6e3f085c78dc7"
+checksum = "d61a485ba4615f636051961b0702a665cbd7d85f8498b4f718ee10efaeee0af3"
 dependencies = [
  "BREP_RANSAC",
  "BREP_blend",
@@ -184,9 +184,9 @@ dependencies = [
 
 [[package]]
 name = "BREP_offset"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66dee53d2df9e876f1d3938dcafb157eff44e8b17157b03e5d14f023e7c943e5"
+checksum = "852cab2e6f5cbbc58772796bc8f6154475856319cde5ce8c5a2160932e34f0f8"
 dependencies = [
  "BREP_RANSAC",
  "BREP_blend",
@@ -220,9 +220,9 @@ dependencies = [
 
 [[package]]
 name = "BREP_reconstruction"
-version = "0.29.0"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0adb666113872c55db0444812a92e35a650e2b09dbef2dea535f0e5fad28940d"
+checksum = "1771191f3224bc4126dee7464adf84c781ec42e1ec26ac662a50d84944d9f767"
 dependencies = [
  "BREP_RANSAC",
  "BREP_kernel",
@@ -232,9 +232,9 @@ dependencies = [
 
 [[package]]
 name = "BREP_render"
-version = "0.31.0"
+version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "810bcc32fbaa927814568e0bd1b309c3d89a19ddb2bc124dec6d6795c97d9997"
+checksum = "7b735b50054905f86c1fd23077a0f8d419c1205376b2753aaf43f69bc2d744c6"
 dependencies = [
  "BREP_cam",
  "BREP_ecad_core",
@@ -281,9 +281,9 @@ dependencies = [
 
 [[package]]
 name = "BREP_solvers"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "788914206013d3ccc2dbb91817d975f84306c2dad18b5e64605e2acfd66b8771"
+checksum = "6be1ef12fc3fa1f8a6b96750b9b48677564f6687b686b21e6f28e652ea180269"
 dependencies = [
  "BREP_RANSAC",
  "BREP_geometry",
@@ -300,9 +300,9 @@ dependencies = [
 
 [[package]]
 name = "BREP_surface_offset"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90cf3951bfe4f816ab290df6052a873f2eacec1bafa625cb77f8098c7b52b276"
+checksum = "3583f12a81075be6e8fba14c3abd346fc6cdaff2dacad6f4bf3cacb86762e10c"
 dependencies = [
  "BREP_RANSAC",
  "BREP_geometry",
@@ -319,9 +319,9 @@ dependencies = [
 
 [[package]]
 name = "BREP_topology"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40c55d0f8f108751857fd72d909577da4973bfb48347cd68c0c5abe596f0196c"
+checksum = "122cea219b97ed65482558739b21447663dac6174b4c9d444afdc6c8ca400dca"
 dependencies = [
  "BREP_RANSAC",
  "BREP_geometry",
